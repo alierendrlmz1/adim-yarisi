@@ -4,13 +4,12 @@ import sqlite3
 from datetime import datetime
 import os
 import google.generativeai as genai
-from PIL import Image
-import io
 
 app = FastAPI()
 
-# --- GOOGLE AI AYARI ---
-genai.configure(api_key="AIzaSyBYAbZeXvsgvY2TDNpGHeHxIDjHX_URIaQ")
+# --- BURAYA KENDİ API KEY'İNİ YAPIŞTIR ---
+API_KEY = "AIzaSyBYAbZeXvsgvY2TDNpGHeHxIDjHX_URIaQ"
+genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 def veritabani_kur():
@@ -30,29 +29,53 @@ async def ana_sayfa():
     c.execute("SELECT isim, adim_sayisi FROM puanlar ORDER BY adim_sayisi DESC LIMIT 10")
     veriler = c.fetchall()
     conn.close()
-    liste_html = "".join([f"<li style='margin:10px; font-size:20px;'><b>{v[0]}:</b> {v[1]} Adım</li>" for v in veriler])
-    return f"<html><body style='text-align:center; font-family:sans-serif;'><h1>🏆 Liderlik Tablosu</h1><ul>{liste_html}</ul><hr><form action='/analiz-et/' method='post' enctype='multipart/form-data'><input type='text' name='kullanici_adi' placeholder='Adınız' required><br><input type='file' name='file' required><br><button type='submit'>Gönder</button></form></body></html>"
+    liste_html = "".join([f"<li style='margin:10px; font-size:18px;'>🏃 <b>{v[0]}:</b> {v[1]} Adım</li>" for v in veriler])
+    return f"""
+    <html>
+    <head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="text-align:center; font-family:sans-serif; background:#f4f4f4; padding-top:50px;">
+        <h1>🏆 Adım Yarışı</h1>
+        <div style="background:white; display:inline-block; padding:20px; border-radius:10px; min-width:280px;">
+            <ul style="list-style:none; padding:0;">{liste_html if liste_html else "Henüz kayıt yok."}</ul>
+        </div>
+        <hr style="margin:30px;">
+        <form action="/analiz-et/" method="post" enctype="multipart/form-data">
+            <input type="text" name="kullanici_adi" placeholder="Adınız" required style="padding:10px;"><br><br>
+            <input type="file" name="file" required><br><br>
+            <button type="submit" style="padding:10px 20px; background:green; color:white; border:none; border-radius:5px;">Fotoğrafı Gönder</button>
+        </form>
+    </body>
+    </html>
+    """
 
 @app.post("/analiz-et/")
 async def adim_analizi(kullanici_adi: str = Form(...), file: UploadFile = File(...)):
-    img_data = await file.read()
-    img = Image.open(io.BytesIO(img_data))
-    
-    # Gemini'ye fotoğrafı gönderip sadece sayıyı sorma
-    response = model.generate_content(["Bu bir adım sayar ekran görüntüsü. Resimdeki toplam adım sayısını sadece rakam olarak yaz. Başka hiçbir şey yazma.", img])
-    
     try:
-        # Gelen cevaptaki rakamları ayıkla
-        adim_sayisi = int(''.join(filter(str.isdigit, response.text)))
-    except:
-        adim_sayisi = 0
+        img_data = await file.read()
+        image_parts = [{"mime_type": "image/jpeg", "data": img_data}]
+        
+        # Yapay zekaya fotoğrafı soruyoruz
+        response = model.generate_content([
+            "Bu bir adımsayar ekran görüntüsü. Resimdeki toplam adım sayısını bul ve sadece rakam olarak yaz. Eğer bulamazsan '0' yaz.",
+            image_parts[0]
+        ])
+        
+        # Sadece rakamları alıyoruz
+        adim_metni = "".join(filter(str.isdigit, response.text))
+        adim_sayisi = int(adim_metni) if adim_metni else 0
 
-    conn = sqlite3.connect('yarismacilar.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO puanlar (isim, adim_sayisi, tarih) VALUES (?, ?, ?)", (kullanici_adi, adim_sayisi, datetime.now().strftime("%Y-%m-%d %H:%M")))
-    conn.commit()
-    conn.close()
-    return HTMLResponse(content=f"<h2>Kaydedildi: {adim_sayisi} Adım</h2><a href='/'>Geri Dön</a>")
+        # Veritabanına kayıt
+        conn = sqlite3.connect('yarismacilar.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO puanlar (isim, adim_sayisi, tarih) VALUES (?, ?, ?)", 
+                  (kullanici_adi, adim_sayisi, datetime.now().strftime("%H:%M")))
+        conn.commit()
+        conn.close()
+        
+        return HTMLResponse(content=f"<h2>Başarılı! {adim_sayisi} adım eklendi.</h2><a href='/'>Listeye Dön</a>")
+    
+    except Exception as e:
+        return HTMLResponse(content=f"<h2>Bir hata oluştu:</h2><p>{str(e)}</p><a href='/'>Tekrar Dene</a>")
 
 if __name__ == "__main__":
     import uvicorn
