@@ -2,14 +2,17 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse
 import sqlite3
 from datetime import datetime
-import uvicorn
 import os
+import google.generativeai as genai
 from PIL import Image
 import io
 
 app = FastAPI()
 
-# Veritabanını oluştur
+# --- GOOGLE AI AYARI ---
+genai.configure(api_key="AIzaSyBYAbZeXvsgvY2TDNpGHeHxIDjHX_URIaQ")
+model = genai.GenerativeModel('gemini-1.5-flash')
+
 def veritabani_kur():
     conn = sqlite3.connect('yarismacilar.db')
     c = conn.cursor()
@@ -27,48 +30,31 @@ async def ana_sayfa():
     c.execute("SELECT isim, adim_sayisi FROM puanlar ORDER BY adim_sayisi DESC LIMIT 10")
     veriler = c.fetchall()
     conn.close()
-    
-    liste_html = "".join([f"<li style='margin:10px; font-size:20px;'>🏆 <b>{v[0]}:</b> {v[1]} Adım</li>" for v in veriler])
-    
-    return f"""
-    <html>
-        <head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="font-family:sans-serif; text-align:center; background-color:#f4f4f4; padding:20px;">
-            <h1 style="color:#2c3e50;">🏃‍♂️ Adım Yarışı</h1>
-            <div style="background:white; display:inline-block; padding:20px; border-radius:15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); min-width:300px;">
-                <ul style="list-style:none; padding:0;">{liste_html if liste_html else "Henüz kimse adım atmadı!"}</ul>
-            </div>
-            <br><br>
-            <form action="/analiz-et/" method="post" enctype="multipart/form-data" style="background:#fff; display:inline-block; padding:20px; border-radius:10px; border:1px solid #ddd;">
-                <h3>Fotoğraf Yükle</h3>
-                <input type="text" name="kullanici_adi" placeholder="Adınız" required style="padding:10px; margin-bottom:10px; width:80% ; border-radius:5px; border:1px solid #ccc;"><br>
-                <input type="file" name="file" accept="image/*" required style="padding:10px;"><br>
-                <button type="submit" style="padding:12px 25px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-size:16px;">Sıralamaya Gir</button>
-            </form>
-        </body>
-    </html>
-    """
+    liste_html = "".join([f"<li style='margin:10px; font-size:20px;'><b>{v[0]}:</b> {v[1]} Adım</li>" for v in veriler])
+    return f"<html><body style='text-align:center; font-family:sans-serif;'><h1>🏆 Liderlik Tablosu</h1><ul>{liste_html}</ul><hr><form action='/analiz-et/' method='post' enctype='multipart/form-data'><input type='text' name='kullanici_adi' placeholder='Adınız' required><br><input type='file' name='file' required><br><button type='submit'>Gönder</button></form></body></html>"
 
 @app.post("/analiz-et/")
 async def adim_analizi(kullanici_adi: str = Form(...), file: UploadFile = File(...)):
-    # Bu kısımda OCR işlemi çok basit bir mantıkla sayıyı yakalar
-    # Render'da Pytesseract hatası almamak için metin okuma kısmını geçici olarak manuel veya alternatifle yapıyoruz
+    img_data = await file.read()
+    img = Image.open(io.BytesIO(img_data))
     
-    # Şimdilik test için rastgele veya basit bir mantık kuruyoruz (Render çökmemesi için)
-    # Gerçek OCR için Google Vision veya hafif bir API entegre edilebilir.
-    # Şimdilik fotoğraf geldiğini onaylayıp basit bir sayı atayalım ki sistemin çalıştığını gör:
+    # Gemini'ye fotoğrafı gönderip sadece sayıyı sorma
+    response = model.generate_content(["Bu bir adım sayar ekran görüntüsü. Resimdeki toplam adım sayısını sadece rakam olarak yaz. Başka hiçbir şey yazma.", img])
     
-    adim_sayisi = 7500 # Test amaçlı, sistemi çalışır görmek için
-    
+    try:
+        # Gelen cevaptaki rakamları ayıkla
+        adim_sayisi = int(''.join(filter(str.isdigit, response.text)))
+    except:
+        adim_sayisi = 0
+
     conn = sqlite3.connect('yarismacilar.db')
     c = conn.cursor()
-    c.execute("INSERT INTO puanlar (isim, adim_sayisi, tarih) VALUES (?, ?, ?)", 
-              (kullanici_adi, adim_sayisi, datetime.now().strftime("%Y-%m-%d %H:%M")))
+    c.execute("INSERT INTO puanlar (isim, adim_sayisi, tarih) VALUES (?, ?, ?)", (kullanici_adi, adim_sayisi, datetime.now().strftime("%Y-%m-%d %H:%M")))
     conn.commit()
     conn.close()
-
-    return HTMLResponse(content=f"<h2>Tebrikler {kullanici_adi}! Adımın başarıyla kaydedildi.</h2><a href='/'>Listeye dön ve gör</a>")
+    return HTMLResponse(content=f"<h2>Kaydedildi: {adim_sayisi} Adım</h2><a href='/'>Geri Dön</a>")
 
 if __name__ == "__main__":
+    import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
