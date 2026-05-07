@@ -10,7 +10,7 @@ app = FastAPI()
 # --- BURAYA KENDİ API KEY'İNİ YAPIŞTIR ---
 API_KEY = "AIzaSyBYAbZeXvsgvY2TDNpGHeHxIDjHX_URIaQ"
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+model = genai.GenerativeModel('models/gemini-pro-vision')
 
 def veritabani_kur():
     conn = sqlite3.connect('yarismacilar.db')
