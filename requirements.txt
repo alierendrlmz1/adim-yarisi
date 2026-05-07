@@ -1,5 +1,5 @@
 fastapi
 uvicorn
-pytesseract
 python-multipart
+google-generativeai
 Pillow
